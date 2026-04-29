@@ -428,18 +428,29 @@ If something is off, `kubectl describe pod <pod-name>` is your friend — the **
 
 ## Step 12 — Call the Service
 
-Get the URL minikube assigns to the NodePort:
+We'll use **`kubectl port-forward`**. It's the most reliable approach across operating systems and drivers — it works the same on macOS, Linux, and Windows, regardless of whether the cluster is local or remote.
+
+In **Terminal A**, open a tunnel and leave it running:
 
 ```bash
-minikube service iris-api --url
+kubectl port-forward service/iris-api 8000:80
 ```
 
-This prints something like `http://192.168.49.2:30080`. Use it:
+You'll see something like:
+
+```
+Forwarding from 127.0.0.1:8000 -> 8000
+Forwarding from [::1]:8000 -> 8000
+```
+
+The command **blocks on purpose** — that process *is* the tunnel. Don't close this terminal until you're done; `Ctrl+C` shuts the tunnel down.
+
+Now in **Terminal B**:
 
 ```bash
-URL=$(minikube service iris-api --url)
+curl http://localhost:8000/health
 
-curl -X POST $URL/predict \
+curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
   -d '{"sepal_length":6.7,"sepal_width":3.0,"petal_length":5.2,"petal_width":2.3}'
 ```
@@ -454,21 +465,27 @@ Expected response:
 }
 ```
 
-Hit the root endpoint a few times in a row:
+> **`port-forward` always pins to one Pod.** It opens a direct tunnel to *a single* Pod chosen at startup. So if you hit `/` repeatedly you'll see the same `pod` name every time — that's not a bug, it's how port-forward works. To see traffic load-balanced across replicas, use the alternative below.
+
+### Alternative: load-balanced access via the Service
+
+If you want to watch the Service distribute requests across all replicas, use `minikube service` instead. In Terminal A:
 
 ```bash
+minikube service iris-api --url
+```
+
+It prints a URL like `http://127.0.0.1:49895` (on macOS with the Docker driver minikube opens a local SSH tunnel; the random port is the tunnel's local end, not our `nodePort: 30080`). It also blocks the terminal — keep it open.
+
+In Terminal B:
+
+```bash
+URL=http://127.0.0.1:49895       # paste whatever Terminal A printed
+
 for i in $(seq 1 6); do curl -s $URL/ ; echo; done
 ```
 
-Notice the `pod` field changes — Kubernetes is load-balancing requests across both replicas.
-
-> **If `minikube service` is hanging or your driver doesn't expose NodePorts** (common on Docker driver on macOS), use port-forwarding instead:
->
-> ```bash
-> kubectl port-forward service/iris-api 8000:80
-> ```
->
-> Then call `http://localhost:8000/predict`.
+Now the `pod` field varies — Kubernetes is round-robining across the replicas behind the Service.
 
 ---
 
@@ -481,7 +498,7 @@ kubectl scale deployment iris-api --replicas=5
 kubectl get pods -w           # watch new Pods come up; Ctrl+C when done
 ```
 
-Repeat the curl loop from Step 12 — you should now see up to five different pod names in the responses.
+Now repeat the **load-balanced** curl loop from the alternative in [Step 12](#alternative-load-balanced-access-via-the-service) (via `minikube service`, not port-forward — port-forward pins to one Pod). You should see up to five different pod names in the responses.
 
 Scale back down:
 
